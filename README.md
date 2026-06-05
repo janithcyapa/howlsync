@@ -1,55 +1,98 @@
-<div align="center">
-  <img src="docs/assets/howlsync-logo.png" alt="HowlSync Logo" width="300" />
+| Supported Targets | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-S2 | ESP32-S3 |
+| ----------------- | -------- | -------- | -------- | -------- | --------- | -------- | -------- |
 
-  # HowlSync
-  **Decentralized Swarm Communication & Spatial Localization**
+# FTM Example
 
-  [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-  [![Framework](https://img.shields.io/badge/Framework-ESP--IDF-red.svg)](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c6/)
-  [![Hardware](https://img.shields.io/badge/Hardware-ESP32--C6-black.svg)](https://www.espressif.com/en/products/socs/esp32-c6)
-  [![Ecosystem](https://img.shields.io/badge/Ecosystem-ArcticHowl-00E5FF.svg)](#)
-</div>
+(See the README.md file in the upper level 'examples' directory for more information about examples.)
 
----
+## Introduction
+One of the ways in which WiFi enabled devices can measure their distance to the Access Point is by measuring Wi-Fi Round Trip Time (Wi-Fi RTT). Wi-Fi RTT is the time a WiFi signal takes to travel from Station to an AP. This time is proportional to the actual distance between them. Given the RTT, the distance can be calculated with below simple formula -
 
-## Overview
+> distance = RTT * c / 2
+> (Where c is the speed of light)
 
-**HowlSync** is the dedicated communication and localization engine for the ArcticHowl swarm robotics ecosystem. Built entirely on the ESP-IDF framework and targeted specifically at the ESP32-C6 architecture, it provides a highly resilient, self-healing mesh network for multi-agent robotic fleets. 
+Wi-Fi RTT is calculated using a procedure called Fine Timing Measurement(FTM). During FTM procedure, a burst of Action frames is transmitted by one device(FTM Responder) to another(FTM Initiator) and each of them is ACK'ed. Hardware in both the devices mark time-of-arrival (TOA) and time-of-departure (TOD) of both Action frame and its ACK. In the end, the FTM Initiator collects the data for all pairs of Action frame and ACK and calculates RTT for each pair with below formula -
 
-Operating completely independent of the robot's primary control loop, HowlSync ensures that computationally heavy networking tasks never interrupt critical flight or drive dynamics. By piping the final localization matrix directly to the primary controller via a high-speed SPI/DMA link, HowlSync acts as an invisible, high-precision tether connecting the entire pack.
+> RTT[i] = (T4[i] - T1[i]) - (T3[i] - T2[i]) Where
+> T1[i] : TOD of i'th Action frame from Responder
+> T2[i] : TOA of i'th Action frame at Initiator
+> T3[i] : TOD of i'th ACK from Initiator
+> T4[i] : TOA of i'th ACK at Responder
 
----
+Average RTT is calculated over all such pairs to get a more accurate result.
+Use this example to perform FTM between a Station and a SoftAP or en external AP that supports FTM Responder mode. Both Station and SoftAP need to be run on the supported ESP targets that support FTM and have it enabled.
 
-## Core Capabilities
+## How to use example
 
-* **Dynamic Mesh Topology:** A decentralized, auto-connecting, and self-healing node network. Drones and rovers can enter or drop out of the swarm seamlessly without breaking the pack's communication structure.
-* **Precision Spatial Mapping:** Leverages 802.11mc (Wi-Fi Fine Time Measurement) Time-of-Flight (ToF) paired with RSSI graph networks to calculate relative distances between all active nodes in real time.
-* **GPS-Denied Navigation:** By mapping the swarm's geometry purely through node-to-node signal propagation, HowlSync dramatically reduces spatial error to the sub-0.5m range, enabling complex swarm maneuvers indoors, underground, or in heavily jammed environments.
-* **Hardware Determinism:** Designed to offload network polling from the primary Zephyr-based flight/drive controller (HowlOS). It simply delivers the finished spatial data array precisely when the Kalman filters need it.
+With this example, users can scan for AP's that support FTM Responder role and perform FTM procedure with different configurations. Below steps show how to do this using 2 devices in Station and SoftAP mode.
+First make sure that `WiFi FTM` is enabled in the project configuration menu (`idf.py menuconfig`). This option is located in `Component config -> Wi-Fi`. `FTM Initiator support` needs to be enabled on Station side and `FTM Responder support` needs to be enabled on SoftAP side, both are enabled by default. Furthermore for getting a detailed report on FTM sessions, enable `FTM Report logging` option in the `Example Configuration`.
+Build and flash the example on a supported device to see below output -
 
----
+```bash
+ ==========================================================
+ |                      Steps to test FTM                 |
+ |                                                        |
+ |  1. Use 'help' for detailed information on parameters  |
+ |  2. Start SoftAP with command 'ap <SSID> <password>'   |
+ |                          OR                            |
+ |  2. Use 'scan' command to search for external AP's     |
+ |  3. On second device initiate FTM with an AP using     |
+ |     command 'ftm -I -s <SSID>'                         |
+ ==========================================================
+ftm>
+```
 
-## Architecture Context
+Use `help` to get a list of available commands and options. Use `scan` command to scan for AP's that support FTM Responder mode. Before initiating FTM with an external AP, make sure that `FTM Responder` tag is visible in the respective scan result entry. Alternatively, start SoftAP on another device using `ap` command, it supports FTM Responder by default. If external FTM Initiators get a large error in distance readings with the SoftAP, note down the reading at zero distance in centimeters, say `cm0`. This distance can be offset using command `ftm -R -o <cm0>` to give accurate readings with the Initiator.
+It is recommended to keep SoftAP bandwidth at 20MHz as it gives more accurate results.
 
-HowlSync is designed to run on the **WolfNav Frost** hardware layer (ESP32-C6) and serves as the bridge between the physical swarm and the internal logic.
+```bash
+ftm> scan
+I (476765) ftm_station: sta start to scan
+ftm> I (478805) ftm_station: [Abeeys Palace][rssi=84]
+I (478805) ftm_station: [privateproperty][rssi=76]
+I (478805) ftm_station: [C904][rssi=69]
+I (478815) ftm_station: [FTM][rssi=-94][FTM Responder]
+I (478815) ftm_station: [Velop][rssi=-115]
+I (478825) ftm_station: sta scan done
+```
 
-1. **The Network (ESP32-C6):** Runs HowlSync, constantly pinging neighboring nodes using FTM/802.11mc and maintaining the mesh graph.
-2. **The Link (SPI + DMA):** HowlSync triggers a hardware interrupt to the main controller and blasts the updated relative coordinate matrix over a high-speed SPI bus.
-3. **The Brain (STM32/Zephyr):** The primary flight/drive controller (running HowlOS) immediately ingests the matrix into its Extended Kalman Filters (EKF) without ever dropping a motor control cycle.
+AP's that support FTM Responder mode can be seen in the scan results. Or setup a SoftAP on another device using the `ap` command -
 
----
+```bash
+ftm> ap FTM password
+I (91271) ftm_ap: Starting SoftAP with FTM Responder support, SSID - FTM, Password - password
+ftm>
+```
 
-## Directory Structure
+Issue `ftm -I` to initiate a session with default configuration of 32 FTM frames. For more configurations below options are available -
+`ftm  [-I] [-c <0/8/16/24/32/64>] [-p <2-255 (x 100 mSec)>] [-s SSID]`
+Where -
+* `-I` OR `--ftm_initiator`:  FTM Initiator mode
+* `-c` OR `--frm_count`: FTM frames to be exchanged (Valid values: 0=No preference, 8, 16, 24, 32, 64, default: 32)
+* `-p` OR `--burst_period`: Periodicity of FTM bursts in 100's of milliseconds (0: No preference, default: 2)
+* `-s` OR `--ssid=SSID`: SSID of AP that supports FTM Responder mode
 
-```text
-howlsync/
-├── CMakeLists.txt
-├── main/
-│   ├── CMakeLists.txt
-│   ├── main.c                  # Entry point and RTOS task initialization
-│   ├── ftm_localization.c      # 802.11mc ToF and RSSI distance calculations
-│   ├── mesh_network.c          # ESP-WIFI-MESH topology management
-│   └── spi_bridge.c            # SPI slave/master DMA link to HowlOS
-├── components/                 # Custom ESP-IDF components
-├── include/                    # Public headers
-└── sdkconfig.defaults          # Default ESP32-C6 configuration (Wi-Fi 6, FTM enabled)
+Currently FTM is only supported in below configuration -
+1. Station as Initiator and SoftAP as Responder on supported ESP devices
+2. Station as Initiator and an external AP that supports FTM in Responder mode
+The first option should be preferred since ESP devices are self calibrated for high resolution measurement.
+
+## Example Output
+Example output of an FTM Procedure -
+
+```bash
+ftm> scan
+I (356414) ftm_station: sta start to scan
+I (358514) ftm_station: [DigitalFortress][rssi=114]
+I (358524) ftm_station: [TEST][rssi=-96][FTM Responder]
+I (358524) ftm_station: sta scan done
+ftm> ftm -I -s TEST
+Starting FTM with 18:fe:34:72:50:c9 on channel 1
+I (391824) ftm_station: Starting FTM Initiator with Frm Count 32, Burst Period - 200mSec
+W (391834) wifi:Starting FTM session in 0.200 Sec
+W (393564) wifi:FTM session ends with 26 valid readings out of 31, Avg raw RTT: 49.218 nSec, Avg RSSI: -1
+I (393564) ftm_station: Estimated RTT - 33 nSec, Estimated Distance - 5.07 meters
+```
+
+The final statement gives the average calculated RTT along with an estimated distance between the Station and the AP. This distance is measured by first adjusting the RTT with any physical analog delays and a calibration delta. Distances measured using RTT are not perfectly accurate, and are subjected to various errors like RF interference, multi-path, path loss, orientations etc.
+The design requires line-of-sight with straightforward propagation path with no less than -70dBm RSSI for better results.
